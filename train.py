@@ -17,16 +17,16 @@ parser.add_argument('--check', action='store_true', help='测试代码选项')
 args = parser.parse_args()
 
 if not args.dataset:
-    print('请提供数据集名称')
+    print('Please provide a dataset name.')
     exit(-1)
 
 if args.dataset == 'CROHME':
     config_file = 'config.yaml'
 
-"""加载config文件"""
+"""load config file"""
 params = load_config(config_file)
 
-"""设置随机种子"""
+"""set random seed"""
 random.seed(params['seed'])
 np.random.seed(params['seed'])
 torch.manual_seed(params['seed'])
@@ -55,8 +55,8 @@ optimizer = getattr(torch.optim, params['optimizer'])(model.parameters(), lr=flo
                                                       eps=float(params['eps']), weight_decay=float(params['weight_decay']))
 
 if params['finetune']:
-    print('加载预训练模型权重')
-    print(f'预训练权重路径: {params["checkpoint"]}')
+    print('Load pretrained model weights')
+    print(f'Pretrained weight path: {params["checkpoint"]}')
     load_checkpoint(model, optimizer, params['checkpoint'])
 
 if not args.check:
@@ -64,7 +64,7 @@ if not args.check:
         os.makedirs(os.path.join(params['checkpoint_dir'], model.name), exist_ok=True)
     os.system(f'cp {config_file} {os.path.join(params["checkpoint_dir"], model.name, model.name)}.yaml')
 
-"""在CROHME上训练"""
+"""exist CROHME on training"""
 if args.dataset == 'CROHME':
     min_score, init_epoch = 0, 0
 

@@ -1,10 +1,10 @@
-# 实验名称
+# experiment name
 experiment: "CAN"
 
-# 随机种子
+# random seed
 seed: 20211024
 
-# 训练参数
+# training parameters
 epochs: 240
 batch_size: 8
 workers: 0
@@ -29,12 +29,13 @@ gradient: 100
 gradient_clip: True
 use_label_mask: False
 
-# 训练数据
+# training data
 train_image_path: 'datasets/CROHME/train_images.pkl'
 train_label_path: 'datasets/CROHME/train_labels.txt'
 
 eval_image_path: 'datasets/CROHME/14_test_images.pkl'
 eval_label_path: 'datasets/CROHME/14_test_labels.txt'
+eval_year: '2014'
 
 word_path: 'datasets/CROHME/words_dict.txt'
 
