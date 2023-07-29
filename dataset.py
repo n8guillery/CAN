@@ -1,151 +1,96 @@
 import torch
-from torch.utils.data import DataLoader, RandomSampler
-
-import os
-from dataclasses import dataclass
-from typing import List, Tuple
-from zipfile import ZipFile
-
 from PIL import Image
-from torch import FloatTensor, LongTensor
-from torchvision.transforms import transforms
+import time
+import pickle as pkl
+from torch.utils.data import DataLoader, Dataset, RandomSampler
 
-from vocab import CROHMEVocab
-
-vocab = CROHMEVocab()
-
-Data = List[Tuple[str, Image.Image, List[str]]]
-
-MAX_SIZE = 35e4  # change here accroading to your GPU memory
+MAX_SIZE = 32e4  # change here according to your GPU memory
 
 
-# load data
-def data_iterator(
-    data: Data,
-    batch_size: int,
-    batch_Imagesize: int = MAX_SIZE,
-    maxlen: int = 200,
-    maxImagesize: int = MAX_SIZE,
-):
-    fname_batch = []
-    feature_batch = []
-    label_batch = []
-    feature_total = []
-    label_total = []
-    fname_total = []
-    biggest_image_size = 0
+class HMERDataset(Dataset):
+    def __init__(self, params, image_path, label_path, words, is_train=True):
+        super(HMERDataset, self).__init__()
+        if image_path.endswith('.pkl'):
+            with open(label_path, 'r') as f:
+                self.labels = f.readlines()
 
-    data.sort(key=lambda x: x[1].size[0] * x[1].size[1])
+            with open(image_path, 'rb') as f:
+                self.images = pkl.load(f)
+        elif image_path.endswith('.list'):
+            with open(label_path, 'r') as f:
+                self.labels = f.readlines()
 
-    i = 0
-    for fname, fea, lab in data:
-        size = fea.size[0] * fea.size[1]
-        fea = transforms.ToTensor()(fea)
-        if size > biggest_image_size:
-            biggest_image_size = size
-        batch_image_size = biggest_image_size * (i + 1)
-        if len(lab) > maxlen:
-            print("sentence", i, "length bigger than", maxlen, "ignore")
-        elif size > maxImagesize:
-            print(
-                f"image: {fname} size: {fea.shape[1]} x {fea.shape[2]} =  bigger than {maxImagesize}, ignore"
-            )
+            with open(image_path, 'r') as f:
+                lines = f.readlines()
+            self.images = {}
+            print(f'data files: {lines}')
+            for line in lines:
+                name = line.strip()
+                print(f'loading data file: {name}')
+                start = time.time()
+                with open(name, 'rb') as f:
+                    images = pkl.load(f)
+                self.images.update(images)
+                print(f'loading {name} cost: {time.time() - start:.2f} seconds!')
         else:
-            if batch_image_size > batch_Imagesize or i == batch_size:  # a batch is full
-                fname_total.append(fname_batch)
-                feature_total.append(feature_batch)
-                label_total.append(label_batch)
-                i = 0
-                biggest_image_size = size
-                fname_batch = []
-                feature_batch = []
-                label_batch = []
-                fname_batch.append(fname)
-                feature_batch.append(fea)
-                label_batch.append(lab)
-                i += 1
-            else:
-                fname_batch.append(fname)
-                feature_batch.append(fea)
-                label_batch.append(lab)
-                i += 1
+            with open(label_path, 'r') as f:
+                self.labels = [line.decode() for line in f.readlines()]
 
-    # last batch
-    fname_total.append(fname_batch)
-    feature_total.append(feature_batch)
-    label_total.append(label_batch)
-    print("total ", len(feature_total), "batch data loaded")
-    return list(zip(fname_total, feature_total, label_total))
+            self.images = {}
+            for line in self.labels:
+                tmp = line.strip().split()
+                img_name = tmp[0]
+                with open(f"{image_path}/{img_name}.bmp","r") as f:
+                    img = Image.open(f).copy()
+                size = img.size[0] * img.size[1]
+                if size > MAX_SIZE:
+                    print(
+                        f"image: {img_name} size: {img.shape[1]} x {img.shape[2]} =  bigger than {MAX_SIZE}, ignore"
+                    )
+                else:
+                    self.images.update({img_name : img})
 
+        self.words = words
+        self.is_train = is_train
+        self.params = params
 
-def extract_data(archive: ZipFile, dir_name: str) -> Data:
-    """Extract all data need for a dataset from zip archive
+    def __len__(self):
+        assert len(self.images) == len(self.labels)
+        return len(self.labels)
 
-    Args:
-        archive (ZipFile):
-        dir_name (str): dir name in archive zip (eg: train, test_2014......)
-
-    Returns:
-        Data: list of tuple of image and formula
-    """
-    with archive.open(f"{dir_name}/caption.txt", "r") as f:
-        captions = f.readlines()
-    data = []
-    for line in captions:
-        tmp = line.decode().strip().split()
-        img_name = tmp[0]
-        formula = tmp[1:]
-        with archive.open(f"{dir_name}/{img_name}.bmp", "r") as f:
-            # move image to memory immediately, avoid lazy loading, which will lead to None pointer error in loading
-            img = Image.open(f).copy()
-        data.append((img_name, img, formula))
-
-    print(f"Extract data from: {dir_name}, with data size: {len(data)}")
-
-    return data
-
-
-@dataclass
-class Batch:
-    img_bases: List[str]  # [b,]
-    imgs: FloatTensor  # [b, 1, H, W]
-    mask: LongTensor  # [b, H, W]
-    indices: List[List[int]]  # [b, l]
-
-    def __len__(self) -> int:
-        return len(self.img_bases)
-
-    def to(self, device) -> "Batch":
-        return Batch(
-            img_bases=self.img_bases,
-            imgs=self.imgs.to(device),
-            mask=self.mask.to(device),
-            indices=self.indices,
-        )
-
-
-def build_dataset(archive, folder: str, batch_size: int):
-    data = extract_data(archive, folder)
-    return data_iterator(data, batch_size)
+    def __getitem__(self, idx):
+        name, *labels = self.labels[idx].strip().split()
+        name = name.split('.')[0] if name.endswith('jpg') else name
+        image = self.images[name]
+        image = torch.Tensor(255-image) / 255
+        image = image.unsqueeze(0)
+        labels.append('<eos>')
+        words = self.words.encode(labels)
+        words = torch.LongTensor(words)
+        return image, words
 
 
 def get_crohme_dataset(params):
-    params['word_num'] = vocab.__len__()
-    with ZipFile("data.zip") as archive:
-        train_dataset = build_dataset(archive, "train", params['batch_size'])
-        eval_dataset = build_dataset(archive, params['eval_year'], 1)
+    words = Words(params['word_path'])
+    params['word_num'] = len(words)
+    print(f"training data path images: {params['train_image_path']} labels: {params['train_label_path']}")
+    print(f"Verify data path images: {params['eval_image_path']} labels: {params['eval_label_path']}")
+
+    train_dataset = HMERDataset(params, params['train_image_path'], params['train_label_path'], words, is_train=True)
+    eval_dataset = HMERDataset(params, params['eval_image_path'], params['eval_label_path'], words, is_train=False)
 
     train_sampler = RandomSampler(train_dataset)
     eval_sampler = RandomSampler(eval_dataset)
 
-    train_loader = DataLoader(train_dataset, sampler=train_sampler,
-                              num_workers=params['workers'], collate_fn=collate_fn, pin_memory=True)
-    eval_loader = DataLoader(eval_dataset, sampler=eval_sampler,
-                              num_workers=params['workers'], collate_fn=collate_fn, pin_memory=True)
+    train_loader = DataLoader(train_dataset, batch_size=params['batch_size'], sampler=train_sampler,
+                              num_workers=params['workers'], collate_fn=collate_fn_dict[params['collate_fn']], pin_memory=True)
+    eval_loader = DataLoader(eval_dataset, batch_size=1, sampler=eval_sampler,
+                              num_workers=params['workers'], collate_fn=collate_fn_dict[params['collate_fn']], pin_memory=True)
 
     print(f'train dataset: {len(train_dataset)} train steps: {len(train_loader)} '
           f'eval dataset: {len(eval_dataset)} eval steps: {len(eval_loader)} ')
     return train_loader, eval_loader
+
 
 def collate_fn(batch_images):
     max_width, max_height, max_length = 0, 0, 0
@@ -171,25 +116,27 @@ def collate_fn(batch_images):
         labels_masks[i][:l] = 1
     return images, image_masks, labels, labels_masks
 
-def collate_fn_bttr(batch):
-    assert len(batch) == 1
-    batch = batch[0]
-    fnames = batch[0]
-    images_x = batch[1]
-    seqs_y = [vocab.words2indices(x) for x in batch[2]]
 
-    heights_x = [s.size(1) for s in images_x]
-    widths_x = [s.size(2) for s in images_x]
+class Words:
+    def __init__(self, words_path):
+        with open(words_path) as f:
+            words = f.readlines()
+            print(f'common {len(words)} class symbol.')
+        self.words_dict = {words[i].strip(): i for i in range(len(words))}
+        self.words_index_dict = {i: words[i].strip() for i in range(len(words))}
 
-    n_samples = len(heights_x)
-    max_height_x = max(heights_x)
-    max_width_x = max(widths_x)
+    def __len__(self):
+        return len(self.words_dict)
 
-    x = torch.zeros(n_samples, 1, max_height_x, max_width_x)
-    x_mask = torch.ones(n_samples, max_height_x, max_width_x, dtype=torch.bool)
-    for idx, s_x in enumerate(images_x):
-        x[idx, :, : heights_x[idx], : widths_x[idx]] = s_x
-        x_mask[idx, : heights_x[idx], : widths_x[idx]] = 0
+    def encode(self, labels):
+        label_index = [self.words_dict[item] for item in labels]
+        return label_index
 
-    # return fnames, x, x_mask, seqs_y
-    return Batch(fnames, x, x_mask, seqs_y)
+    def decode(self, label_index):
+        label = ' '.join([self.words_index_dict[int(item)] for item in label_index])
+        return label
+
+
+collate_fn_dict = {
+    'collate_fn': collate_fn
+}

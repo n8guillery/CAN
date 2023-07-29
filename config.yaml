@@ -30,14 +30,14 @@ gradient_clip: True
 use_label_mask: False
 
 # training data
-train_image_path: 'datasets/CROHME/train_images.pkl'
-train_label_path: 'datasets/CROHME/train_labels.txt'
+train_image_path: 'datasets/train'
+train_label_path: 'datasets/train/caption.txt'
 
-eval_image_path: 'datasets/CROHME/14_test_images.pkl'
-eval_label_path: 'datasets/CROHME/14_test_labels.txt'
+eval_image_path: 'datasets/2014'
+eval_label_path: 'datasets/2014/caption.txt'
 eval_year: '2014'
 
-word_path: 'datasets/CROHME/words_dict.txt'
+word_path: 'datasets/dictionary.txt'
 
 # collate_fn
 collate_fn: collate_fn
