@@ -10,13 +10,13 @@ from PIL import Image
 from torch import FloatTensor, LongTensor
 from torchvision.transforms import transforms
 
-from .vocab import CROHMEVocab
+from vocab import CROHMEVocab
 
 vocab = CROHMEVocab()
 
 Data = List[Tuple[str, Image.Image, List[str]]]
 
-MAX_SIZE = 32e4  # change here accroading to your GPU memory
+MAX_SIZE = 35e4  # change here accroading to your GPU memory
 
 
 # load data
@@ -130,6 +130,7 @@ def build_dataset(archive, folder: str, batch_size: int):
 
 
 def get_crohme_dataset(params):
+    params['word_num'] = vocab.__len__()
     with ZipFile("data.zip") as archive:
         train_dataset = build_dataset(archive, "train", params['batch_size'])
         eval_dataset = build_dataset(archive, params['eval_year'], 1)
@@ -146,8 +147,31 @@ def get_crohme_dataset(params):
           f'eval dataset: {len(eval_dataset)} eval steps: {len(eval_loader)} ')
     return train_loader, eval_loader
 
+def collate_fn(batch_images):
+    max_width, max_height, max_length = 0, 0, 0
+    batch, channel = len(batch_images), batch_images[0][0].shape[0]
+    proper_items = []
+    for item in batch_images:
+        if item[0].shape[1] * max_width > 1600 * 320 or item[0].shape[2] * max_height > 1600 * 320:
+            continue
+        max_height = item[0].shape[1] if item[0].shape[1] > max_height else max_height
+        max_width = item[0].shape[2] if item[0].shape[2] > max_width else max_width
+        max_length = item[1].shape[0] if item[1].shape[0] > max_length else max_length
+        proper_items.append(item)
 
-def collate_fn(batch):
+    images, image_masks = torch.zeros((len(proper_items), channel, max_height, max_width)), torch.zeros((len(proper_items), 1, max_height, max_width))
+    labels, labels_masks = torch.zeros((len(proper_items), max_length)).long(), torch.zeros((len(proper_items), max_length))
+
+    for i in range(len(proper_items)):
+        _, h, w = proper_items[i][0].shape
+        images[i][:, :h, :w] = proper_items[i][0]
+        image_masks[i][:, :h, :w] = 1
+        l = proper_items[i][1].shape[0]
+        labels[i][:l] = proper_items[i][1]
+        labels_masks[i][:l] = 1
+    return images, image_masks, labels, labels_masks
+
+def collate_fn_bttr(batch):
     assert len(batch) == 1
     batch = batch[0]
     fnames = batch[0]
