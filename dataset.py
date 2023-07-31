@@ -1,4 +1,5 @@
 import torch
+from torchvision.transforms import transforms
 from PIL import Image
 import time
 import pickle as pkl
@@ -34,21 +35,23 @@ class HMERDataset(Dataset):
                 print(f'loading {name} cost: {time.time() - start:.2f} seconds!')
         else:
             with open(label_path, 'r') as f:
-                self.labels = [line.decode() for line in f.readlines()]
+                self.labels = f.readlines()
 
             self.images = {}
+            removes = []
             for line in self.labels:
                 tmp = line.strip().split()
                 img_name = tmp[0]
-                with open(f"{image_path}/{img_name}.bmp","r") as f:
-                    img = Image.open(f).copy()
+                img = Image.open(f"{image_path}/{img_name}.bmp").copy()
                 size = img.size[0] * img.size[1]
                 if size > MAX_SIZE:
-                    print(
-                        f"image: {img_name} size: {img.shape[1]} x {img.shape[2]} =  bigger than {MAX_SIZE}, ignore"
-                    )
+                    print(f"image: {img_name}, size: {img.size[0]} x {img.size[1]} =  bigger than {MAX_SIZE}, ignore")
+                    removes.append(line)
                 else:
                     self.images.update({img_name : img})
+
+            for line in removes:
+                self.labels.remove(line)
 
         self.words = words
         self.is_train = is_train
@@ -61,19 +64,18 @@ class HMERDataset(Dataset):
     def __getitem__(self, idx):
         name, *labels = self.labels[idx].strip().split()
         name = name.split('.')[0] if name.endswith('jpg') else name
-        image = self.images[name]
-        image = torch.Tensor(255-image) / 255
-        image = image.unsqueeze(0)
+        image = transforms.ToTensor()(self.images[name])
+        image = (255-image) / 255
         labels.append('<eos>')
         words = self.words.encode(labels)
         words = torch.LongTensor(words)
         return image, words
 
 
-def get_crohme_dataset(params):
+def get_crohme_dataset(params): 
     words = Words(params['word_path'])
     params['word_num'] = len(words)
-    print(f"training data path images: {params['train_image_path']} labels: {params['train_label_path']}")
+    print(f"Training data path images: {params['train_image_path']} labels: {params['train_label_path']}")
     print(f"Verify data path images: {params['eval_image_path']} labels: {params['eval_label_path']}")
 
     train_dataset = HMERDataset(params, params['train_image_path'], params['train_label_path'], words, is_train=True)
